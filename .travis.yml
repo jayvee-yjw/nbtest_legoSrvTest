@@ -1,0 +1,18 @@
+language: python
+python:
+- '2.7'
+before_install:
+- pip install pytest-cov
+install:
+- pip install DictObject nbtest flask
+script:
+- PYTHONPATH=. py.test -v --cov=nbtest_legoSrvTest --cov-report term-missing tests
+deploy:
+  provider: pypi
+  user: jayvee-yjw
+  password:
+    secure: iUEjrMHVkGrDUlR993e3iar8Eb4gixoo9byLIunaoa17QaLu4D2oI/uOhHp8QvbAmXlQJLYzVw9GbaR+18ZOTYiyzXkybb/YTwa29hSVAGXE6mLmOQuGRyNrnQ0A0SqlYXFdyWzgvF9SHXEA/onSFVcNrM2+ILSnR27YUVOyUG59BHOeRh9AwLhO9NepKNHkvb3XeKI/kKlgTNMjaSFmv7mzeu3urWmvRfjIZIUAHWQwrx0tX8VOo9aNV/XryvkgLk1k/oTPlHLx5Nut3CXeqC6JSTh6dNtl56F/tO6ukUUaJ3+jZ6LeOczAHzQt6F7l1C6EJ0PPFJodRmTjLVana0Y7ue4TRDFyJkvmdyggSk3Zxl5ZCcNbez3TpVKct+vIx2J5Jbzh6Mij16YDOMD5EqehpxcOhmCj69VUHC1bBflTIU28js8J2EWRvYMQzF31DcLhkmpPzsSulEM9opDc9MBE4ue/fOxJbamBD0BecDUpU+3m8uz4rote4biLXAZEIXzeE2cL5Sd7jZ2iELUCC5ttS+wcG21iPZSNq/AyQr/Lab/QDNdcQA5/OjEjNJbFaEZb9AMUPBcNlO/3vqo9HcuLqE5pvJuadFMUAM76pgLMT5XZr1hgpAfzS0ZlfXJHbzoea0nxjH8aISdgJlTm1GdYKtsoKNXi9QeOfVEcrj8=
+  on:
+    python: 2.7
+    tags: true
+    branch: master

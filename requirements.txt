@@ -1,0 +1,5 @@
+chardet==3.0.4
+DictObject==1.0.5
+jsonpath-rw-ext>=1.2.0
+nbtest>=0.1.0
+flask>=1.0.2
