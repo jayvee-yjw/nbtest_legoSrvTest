@@ -14,5 +14,5 @@ deploy:
     secure: fjKyUA+EXVnN1E3GC7P412IDfuT0nLs944NgS/NAh/dPHaXdlAG7GUzcZn2q4ZAh6lQ0uBHEchX0wsH0obwVlAenhTcLb7yYCTRsn1qUKT9NeYd4mdOhXbR1GGGBYHvqRye+cWwnSbjqGMmdJPNxfLKyub2E0T3D0M9x48O9zTw+9t5sAiV6cy0Ase5R5idn38do07HJ2A4R1pMfjSuq3+Cfr9iprqn7sCSeW2dm39MRrsQbIyQD6eJQwIqJJyuJvjHrDwZ8EQEpj0O1vXpBnhb7CyGfBU2xnF7NYqvyePJoyPiZYuEkUnOo9KqwMyUrOQxTGRUwj6N/x8yyrSxl3d7AEhasHgffLIlvR3ZrCmDFnvzwqGNA1SzXngvvJmMQ92XhfoPh1p9qqJZe8K1Glf3b4wd3pl8WGARR+JXBSdPS4ZbDmhwDRb//kxhFGtvwm1bvI7Nt164RO4t3sG15nXkJ3EzCO+m2iuuD/HZekCRqDsmeBVbDYEBG/+tdVE4XKQrNYiJjkGm5WVY5MeKqgoBuVFl0R6npW9wyfqWcVw/fpN3R/5If/AK3Mfgr1tOIy0LFoSJm3Q9edLgTYMQmvTTs62J+YEpRab1taU8EHaWtTYsEZ/bv7SeID2q6Jqkkk2q1A5/NdTDsEWxelIcPbkwK1FxhCIeOf4WJQLNjXQ8=
   true:
     python: 2.7
-    tags: false
+    tags: true
     branch: master
