@@ -354,6 +354,10 @@ def defTestStep(case):
                 AX(testStep, 'testStep@{}'.format(fn.__name__)).is_instance_of(TestStep)
                 testStep.name = fn.__name__
                 testStep.title = fn_argSpec.defaults[0]
+                if testStep.Chks._isEmpty():
+                    testStep.Chks = TestStep.Chks(
+                        code=TestStep.Chk(jp='$.code', expect=Libs.Code_Suc)
+                    )
             return testStep
         case.addStepFn(defTestStep_wrapper)
         return defTestStep_wrapper
@@ -373,6 +377,8 @@ class TestStep(TestFlow):
                 self.Chks[name] = respChk
         def toJson(self, **kwargs):
             return Libs.toJson(**{k:v.toJson() for k,v in self.Chks.items()})
+        def _isEmpty(self):
+            return len(set(self.Chks.keys()) - set(['__OrderedKeys__'])) == 0
 
     class Chk(object):
         def __init__(self, jp=None, expect=None, chkExec='Chk.fact==Chk.expect'):
@@ -389,7 +395,7 @@ class TestStep(TestFlow):
 
 
     def __init__(self, reqUrl='', reqMethod='post', title='', name=None, reqJson=None, tryTimes=2, timeout=None,
-                 Chks=Chks(jp='$.code', expect=Libs.Code_Suc), chksExt='', Post='', reqExtKw={}, _caseObj=None, IN={}):
+                 Chks=Chks(), chksExt='', Post='', reqExtKw={}, _caseObj=None, IN={}):
         if not reqUrl:
             return
         self._caseObj = _caseObj
@@ -409,6 +415,7 @@ class TestStep(TestFlow):
         self.tryTimes = tryTimes
         self.timeout = timeout
         self.Chks = TestStep.Chks() and Chks
+
         AX(chksExt, 'chksExt').is_instance_of(basestring)
         self.chksExt = chksExt
         self.RES = None
