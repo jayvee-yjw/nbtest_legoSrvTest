@@ -389,7 +389,7 @@ class TestStep(TestFlow):
 
 
     def __init__(self, reqUrl='', reqMethod='post', title='', name=None, reqJson=None, tryTimes=2, timeout=None,
-                 Chks=Chks(), chksExt='', Post='', reqExtKw={}, _caseObj=None, IN={}):
+                 Chks=Chks(jp='$.code', expect=Libs.Code_Suc), chksExt='', Post='', reqExtKw={}, _caseObj=None, IN={}):
         if not reqUrl:
             return
         self._caseObj = _caseObj
