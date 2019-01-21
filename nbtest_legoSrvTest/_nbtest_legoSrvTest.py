@@ -306,9 +306,9 @@ def asTestFlowFn(fn):
             testFlow = fn(*args, **IN_kwargs)
             AX(testFlow, name+':testFlow').is_instance_of(TestFlow)
             testFlow.run()
-            return testFlow
+            return testFlow.toJson()
         except Exception as errObj:
-            return TestFlowFail(failMsg=Utils.err_detail(errObj))
+            return TestFlowFail(failMsg=Utils.err_detail(errObj)).toJson()
 
     setattr(asTestFlowFn_wrapper, '__asTestFlowFn__', True)
     setattr(asTestFlowFn_wrapper, '__OriginArgspecStr__', Utils.fn_argspecStr(fn))
@@ -739,11 +739,13 @@ class FlaskExt(Flask):
                     IN_kwargs = dict(**IN)
                     IN_kwargs.update(dict(T=IN, IN=IN))
 
-                    testFlow = fn(*args, **IN_kwargs)
-                    if isinstance(testFlow, TestFlowFail):
-                        return jsonify(testFlow.toJson())
-                    AX(testFlow, name+':testFlow').is_instance_of(TestFlow)
-                    result = testFlow.toJson(__YFLow__=IN if IN.get('__YFLow__') else {})
+                    result = fn(*args, **IN_kwargs)
+                    # if isinstance(testFlow, TestFlowFail):
+                    #     return jsonify(testFlow.toJson())
+                    #AX(testFlow, name+':testFlow').is_instance_of(TestFlow)
+                    #result = testFlow.toJson(__YFLow__=IN if IN.get('__YFLow__') else {})
+                    if IN.get('__YFLow__'):
+                        result.__YFLow__ = IN
                     return jsonify(result)
                 except Exception as errObj:
                     return jsonify(dict(failMsg=Utils.err_detail(errObj)))
