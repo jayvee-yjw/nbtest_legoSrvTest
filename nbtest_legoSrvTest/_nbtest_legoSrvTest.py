@@ -19,25 +19,54 @@ from nbtest.Utils import Undef, TYPE
 from nbtest.assertpyx import AX
 from flask import Flask, request, jsonify, Response
 
-
 class Libs(object):
-    class PC(object):
+    """ PC->ENV->INI 常量划分为三个层次，可变程度依次递增 """
+    class _ConstPC(object):
+        """ ProdConst项目产品级常量(在产品中固定不变的) """
         Url_Ex = "http://127.0.0.1:9901"
         Timeout = 30
         TryTimes = 1
+        ENV_DEFAULT = 'default'
+    PC = _ConstPC
     @classmethod
     def updPC(cls, pcCls):
-        AX(pcCls, '').doCalled(Utils.isSubCls, cls.PC).is_true()
-        cls.PC = pcCls
-    class ENV(object):
-        pass
+        AX(pcCls, '').doCalled(Utils.isSubCls, Libs._ConstPC).is_true()
+        Libs.PC = pcCls
+    class _ConstENV(object):
+        """ ProdConst环境级常量(在产品中不同集群or不同服务器or不同app下会变的) """
+        _CfgEnvs = DictObject({})
+        @classmethod
+        def loadCfgEnv(cls, envName):
+            AX(envName, 'need envName in cfgEnvs.keys()').isIn(cls._CfgEnvs.keys())
+            cfgEnv = cls._CfgEnvs[envName]
+            Libs.updENV(cfgEnv)
+            return TYPE and cls() and cfgEnv
+        def __init__(self, __Name__=None, **kwargs):
+            if __Name__ is None:
+                return
+            AX(__Name__, 'need __Name__ not exists in cfgEnvs.keys()').isNotIn(self.__class__._CfgEnvs.keys())
+            self.__Name__ = __Name__
+            self.__class__._CfgEnvs[__Name__] = self
+            for k, v in kwargs.items():
+                if k[0].isupper():
+                    setattr(self, k, v)
+    ENV = _ConstENV()
     @classmethod
-    def updENV(cls, envCls):
-        AX(envCls, '').is_instance_of(Libs.ENV)
-        cls.ENV = envCls
+    def updENV(cls, envInst):
+        AX(envInst, '').is_instance_of(Libs._ConstENV)
+        Libs.ENV = envInst
+    class _ConstINI(object):  #用户启动时配置(每次)
+        """ 用户启动时配置(类似于sys.argv，用户每次启动都可能变化的) """
+        EnvName = 'default'
+    INI = _ConstINI
+    @classmethod
+    def updINI(cls, iniCls):
+        AX(iniCls, '').doCalled(Utils.isSubCls, Libs._ConstINI).is_true()
+        Libs.INI = iniCls
 
-    Code_Suc = 200
-    Code_Err = -200
+    Code_Suc = 200              # testFlow成功码
+    Code_Err = -200             # testFlow失败码
+    JpFinds_Err = str(Utils.UndefCls('JpFinds_Err'))    # Utils.jpFinds失败时的默认值
 
     class MyLogger(object):
         TRACE = logging.DEBUG - 1
@@ -71,10 +100,13 @@ class Libs(object):
     logDbg = logger.debug
 
     @staticmethod
-    def toJson(**kwargs):
-        retJson = {}
-        for k, v in kwargs.items():
-            assert isinstance(k, (NoneType, bool, int, long, float, basestring, list, dict)), \
+    def dictToJson(dict_, **kwargs):
+        retJson = DictObject({})
+        for k, v in dict_.items():
+            if kwargs.get('__testFlowObj__') and k=='__testFlowObj__':
+                continue
+            if not isinstance(v, (NoneType, bool, int, long, float, basestring, list, dict)):
+                assert False, \
                 'isinstance(value, (NoneType, bool, int, long, float, basestring, list, dict)): {}={1!r}' \
                     .format(k, v)
             retJson[k] = v
@@ -85,11 +117,12 @@ class Libs(object):
         def __init__(self, RES=None, reqUrl=None, reqJson=None, errObj=None):
             self.reqUrl = reqUrl
             self.reqJson = reqJson
+            assert isinstance(RES, dict), 'assert isinstance(RES, dict)'
             self.RES = RES
             self.errObj = errObj
 
     @staticmethod
-    def httpjson_post(reqUrl='', reqJson={}, reqMethod='post', reqExtKw={},
+    def httpjson_post(reqUrl, reqJson={}, reqMethod='post', reqExtKw={},
                       tryTimes=None, timeout=None,
                       __ThreadRets__=None, __ThreadName__=None, **kwargs):
         _resp = None
@@ -128,13 +161,13 @@ class Libs(object):
                     continue
                 if _resp==None:
                     _resp = DictObject(status_code=None, text=None)
-                # RES = {
-                #     '__error_at_respObj__': dict(status_code=_resp.status_code, text=_resp.text, reqUrl=str(reqUrl))
-                # }
+                RES = {
+                    '__error_at_respObj__': dict(status_code=_resp.status_code, text=_resp.text, reqUrl=str(reqUrl))
+                }
                 break
         if RES is None:
             RES = {
-                '__error_at_respObj__': dict(status_code=_resp.status_code, text=_resp.text)
+                '__error_at_respObj__': dict(status_code=_resp.status_code, text=_resp.text, reqUrl=str(reqUrl))
             }
             Libs.logDbg(RES)
         ret = Libs.HttpjsonResp(
@@ -212,30 +245,19 @@ class Libs(object):
         return __ThreadRets__.rets()
 
 
-class CfgEnv(Libs.ENV):
-    _CfgEnvs = DictObject({})
-    @classmethod
-    def loadCfgEnv(cls, envName):
-        AX(envName, 'need envName in cfgEnvs.keys()').isIn(cls._CfgEnvs.keys())
-        cfgEnv = cls._CfgEnvs[envName]
-        Libs.updENV(cfgEnv)
-        return TYPE and cls() and cfgEnv
+CfgEnv = Libs.ENV
 
-    def __init__(self, __Name__=None, **kwargs):
-        if __Name__ is None:
-            return
-        AX(__Name__, 'need __Name__ not exists in cfgEnvs.keys()').isNotIn(self.__class__._CfgEnvs.keys())
-        self.__Name__ = __Name__
-        self.__class__._CfgEnvs[__Name__] = self
-        for k, v in kwargs.items():
-            if k[0].isupper():
-                setattr(self, k, v)
 
 
 class TestDriver(object):
     @staticmethod
     def isaDvMethod(o):
         return hasattr(o, 'im_self') and isinstance(o.im_self, TestDriver)
+
+class TestBizKw(object):
+    @staticmethod
+    def isaBizKwMethod(o):
+        return hasattr(o, 'im_self') and isinstance(o.im_self, TestBizKw)
 
 class TestFlow(object):
     """ base_class for TestCase TestSuite TestModule """
@@ -244,8 +266,8 @@ class TestFlow(object):
 class TestFlowFail(object):
     def __init__(self, failMsg):
         self.failMsg = failMsg
-    def toJson(self):
-        return Libs.toJson(failMsg=self.failMsg)
+    def toJson(self, **kwargs):
+        return Libs.dictToJson(dict(failMsg=self.failMsg), **kwargs)
 
 
 def asTestFlowFn(fn):
@@ -306,9 +328,12 @@ def asTestFlowFn(fn):
             testFlow = fn(*args, **IN_kwargs)
             AX(testFlow, name+':testFlow').is_instance_of(TestFlow)
             testFlow.run()
-            return testFlow.toJson()
+            ret = testFlow.toJson(**kwargs)
+            if [__i for __i in inspect.stack() if __i[1].find('\\helpers\\pydev\\') != -1]: #PyDev调试模式
+                ret['__testFlowObj__'] = testFlow
+            return ret
         except Exception as errObj:
-            return TestFlowFail(failMsg=Utils.err_detail(errObj)).toJson()
+            return TestFlowFail(failMsg=Utils.err_detail(errObj)).toJson(**kwargs)
 
     setattr(asTestFlowFn_wrapper, '__asTestFlowFn__', True)
     setattr(asTestFlowFn_wrapper, '__OriginArgspecStr__', Utils.fn_argspecStr(fn))
@@ -376,12 +401,13 @@ class TestStep(TestFlow):
                     'respChk={!r}: assert isinstance(respChk, TestStep.Chk)'.format(respChk)
                 self.Chks[name] = respChk
         def toJson(self, **kwargs):
-            return Libs.toJson(**{k:v.toJson() for k,v in self.Chks.items()})
+            return Libs.dictToJson({k:v.toJson(**kwargs) for k,v in self.Chks.items()}, **kwargs)
         def _isEmpty(self):
             return len(set(self.Chks.keys()) - set(['__OrderedKeys__'])) == 0
 
     class Chk(object):
-        def __init__(self, jp=None, expect=None, chkExec='Chk.fact==Chk.expect'):
+        def __init__(self, jp=None, expect=Utils.Undef, extractor='',
+                     chkExec='Chk.fact==Chk.expect if Chk.expect!=Utils.Undef else Chk.fact!=Libs.JpFinds_Err'):
             if jp == None:
                 return
             # self.name = name; assert isinstance(name, basestring), "name={!r}: assert isinstance(name, basestring)".format(name)
@@ -390,9 +416,19 @@ class TestStep(TestFlow):
             self.chkExec = chkExec
             self.expect = expect
             self.fact = None
+            self.extractor = extractor
         def toJson(self, **kwargs):
-            return Libs.toJson(jp=self.jp, chkExec=self.chkExec, expect=self.expect, fact=self.fact)
+            return Libs.dictToJson(dict(
+                jp=self.jp, chkExec=self.chkExec, expect=self.expect, extractor=self.extractor, fact=self.fact
+            ), **kwargs)
 
+    @property
+    def RES(self):
+        return self._RES
+    @RES.setter
+    def RES(self, value):
+        assert isinstance(value, dict), 'assert isinstance(value, dict), but value isa {}'.format(type(value))
+        self._RES = value
 
     def __init__(self, reqUrl='', reqMethod='post', title='', name=None, reqJson=None, tryTimes=2, timeout=None,
                  Chks=Chks(), chksExt='', Post='', reqExtKw={}, _caseObj=None, IN={}):
@@ -406,7 +442,9 @@ class TestStep(TestFlow):
         self.reqUrl = reqUrl
         if not (isinstance(reqUrl, basestring)
                 or Utils.isinstanceT(self.reqUrl, FlaskExt.RouteTestFlow)
-                or TestDriver.isaDvMethod(self.reqUrl)):
+                or TestDriver.isaDvMethod(self.reqUrl)
+                or TestBizKw.isaBizKwMethod(self.reqUrl)
+        ):
             assert False, 'assert reqUrl={!r} isa str or FlaskExt.RouteTestFlow or TestDriver.isaDvMethod(reqUrl)'.format(self.reqUrl)
         self.IN = IN       #TODO 一般只有当用于@routeTestFlow时才会用到，仅用于方便传递参数
         self.reqJson = reqJson
@@ -418,7 +456,7 @@ class TestStep(TestFlow):
 
         AX(chksExt, 'chksExt').is_instance_of(basestring)
         self.chksExt = chksExt
-        self.RES = None
+        self.RES = {}
         self.failMsg = ''
         self.Post = Post
         self._VStep = DictObject(Chks=self.Chks.Chks, RES=DictObject({}), IN=self.IN)
@@ -442,14 +480,14 @@ class TestStep(TestFlow):
         if isinstance(self.reqUrl, basestring) or Utils.isinstanceT(self.reqUrl, FlaskExt.RouteTestFlow):
             httpjson_ret = Libs.httpjson_post(reqMethod=self.reqMethod, reqUrl=self.reqUrl, reqJson=self.reqJson, reqExtKw=self.reqExtKw,
                                               tryTimes=self.tryTimes, timeout=self.timeout)
-        elif TestDriver.isaDvMethod(self.reqUrl):
+        elif TestDriver.isaDvMethod(self.reqUrl) or TestBizKw.isaBizKwMethod(self.reqUrl):
             RES = None
             errObj = None
             try:
                 RES = AX(self, self.name).doMethod('reqUrl', *self.reqJson.get('__Args__',[]), **self.reqJson).val
             except Exception as errObj:
-                pass
-            httpjson_ret = DictObject(RES=RES, errObj=errObj)
+                return self.toReturn('call_reqUrl({})'.format(self.reqUrl), errObj)
+            httpjson_ret = Libs.HttpjsonResp(RES=RES, errObj=errObj)
         else:
             assert False, 'assert reqUrl={!r} isa str or FlaskExt.RouteTestFlow or Utils.isFn(reqUrl)'.format(self.reqUrl)
 
@@ -463,11 +501,13 @@ class TestStep(TestFlow):
             Chk = TYPE and TestStep.Chk() and self.Chks.Chks[name]
             try:
                 assert isinstance(Chk.chkExec, basestring), 'assert isinstance(Chk.chkExec, basestring), but Chk.chkExec={!r}'.format(Chk.chkExec)
-                Chk.fact = Utils.jpFinds(self.RES, Chk.jp, dftRaise=False, dft=str(Undef))  # str(Undef)才能被JSON化
+                Chk.fact = Utils.jpFinds(self.RES, Chk.jp, dftRaise=False, dft=Libs.JpFinds_Err)  # Libs.JpFinds_Err才能被JSON化
+                if Chk.extractor:
+                    Chk.fact = eval(Chk.extractor.encode('utf-8'), dict(Chk=DictObject(fact=Chk.fact)))
             except Exception as errObj:
                 return self.toReturn('Chks.{}'.format(name), errObj)
             try:
-                if not eval(Chk.chkExec.encode('utf-8'), dict(Chk=Chk, Chks=self.Chks.Chks, V=V, _VStep=_VStep)):
+                if not eval(Chk.chkExec.encode('utf-8'), dict(Chk=Chk, Chks=self.Chks.Chks, V=V, _VStep=_VStep, Libs=Libs, Utils=Utils)):
                     failMsg = '(expect ({}), but fact={} expect={})'.format(Chk.chkExec, Chk.fact, Chk.expect)
                     if self.RES.get('failMsg'):
                         failMsg = '{} RES.failMsg=\n    {}'.format(failMsg, self.RES.get('failMsg'))
@@ -475,7 +515,7 @@ class TestStep(TestFlow):
             except Exception as errObj:
                 return self.toReturn('Chks.{}(chkExec={!r})'.format(name, Chk.chkExec), errObj)
 
-        if self.chksExt and not eval(self.chksExt.encode('utf-8'), dict(Chks=self.Chks.Chks, V=V, _VStep=_VStep)):
+        if self.chksExt and not eval(self.chksExt.encode('utf-8'), dict(Chks=self.Chks.Chks, V=V, _VStep=_VStep, Libs=Libs, Utils=Utils)):
             return self.toReturn('chksExt', self.chksExt)
 
         if self.Post:
@@ -495,13 +535,15 @@ class TestStep(TestFlow):
         return
 
     def toJson(self, **kwargs):
-        result = Libs.toJson(
+        result = Libs.dictToJson(dict(
             name=self.name, title=self.title, IN=self.IN,
             reqUrl=str(self.reqUrl), reqJson=self.reqJson, # 造数据时太长的reqJson无关注意义
             reqMethod=self.reqMethod, reqExtKw=self.reqExtKw,
-            RES=self.RES, Chks=self.Chks.toJson(), chksExt=self.chksExt,
+            RES=Libs.dictToJson(self.RES, **kwargs),
+            Chks=self.Chks.toJson(**kwargs),
+            chksExt=self.chksExt,
             Post=self.Post, failMsg=self.failMsg, code=Libs.Code_Err if self.failMsg else Libs.Code_Suc
-        )
+        ), **kwargs)
         return Libs.to_RES(result)
 
     def ifSuc(self):
@@ -581,8 +623,10 @@ class TestCase(TestFlow):
 
     def toJson(self, __YFLow__={}, **kwargs):
         assert isinstance(__YFLow__, dict), 'assert isinstance(__YFLow__, dict)'
-        result = Libs.toJson(name=self.name, steps=[step.toJson() for step in self._stepObjs],
-                    code=self.code, IN=self.IN, OUT=self.OUT, failMsg=self.failMsg)
+        result = Libs.dictToJson(dict(
+            name=self.name, steps=[step.toJson(**kwargs) for step in self._stepObjs],
+            code=self.code, IN=self.IN, OUT=self.OUT, failMsg=self.failMsg
+        ), **kwargs)
         if len(__YFLow__.keys()):  # 适配 YFlow
             result["errno"] = 1 if result["code"]!=Libs.Code_Suc else 0
             result["data"] = self.getStepsBrief()
@@ -660,7 +704,7 @@ class TestSuite(TestFlow):
         self.sons = sons
         return
     def toJson(self, **kwargs):
-        result = Libs.toJson(code=self.code, sons=self.sons, failMsg=self.failMsg)
+        result = Libs.dictToJson(dict(code=self.code, sons=self.sons, failMsg=self.failMsg), **kwargs)
         return Libs.to_RES(result)
 
 
@@ -747,10 +791,6 @@ class FlaskExt(Flask):
                     IN_kwargs.update(dict(T=IN, IN=IN))
 
                     result = fn(*args, **IN_kwargs)
-                    # if isinstance(testFlow, TestFlowFail):
-                    #     return jsonify(testFlow.toJson())
-                    #AX(testFlow, name+':testFlow').is_instance_of(TestFlow)
-                    #result = testFlow.toJson(__YFLow__=IN if IN.get('__YFLow__') else {})
                     if IN.get('__YFLow__'):
                         result.__YFLow__ = IN
                     return jsonify(result)
