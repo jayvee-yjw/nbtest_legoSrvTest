@@ -1,11 +1,9 @@
 # coding=utf-8
 from __future__ import unicode_literals, print_function
-import sys
-reload(sys)
-sys.setdefaultencoding('utf-8')
+
 
 import json, types, requests, sys, codecs, traceback, threading, random, functools, inspect, re
-import urllib2
+import urlparse, urllib2
 import datetime, time   # time 模块不能删，用作eval('time.sleep')
 from types import NoneType
 from collections import OrderedDict
@@ -15,10 +13,14 @@ import logging
 from DictObject import DictObject
 
 from nbtest import Utils
-from nbtest.Utils import UndefCls, Undef, TYPE
+from nbtest.jsonpath import jpFinds
+from nbtest.Utils import UndefCls, json_o2t, TYPE, str_fmt, str_fmtB
 from nbtest.assertpyx import AX
 from flask import Flask, request, jsonify, Response, helpers
 import flask
+
+
+UserLibs = DictObject()
 
 
 class Libs(object):
@@ -162,6 +164,10 @@ class Libs(object):
             self.errObj = errObj
 
     @staticmethod
+    def jpFinds(*args, **kwargs):
+        return jpFinds(*args, **kwargs)
+
+    @staticmethod
     def httpjson_post(reqUrl, reqJson={}, reqMethod='post', reqExtKw={},
                       tryTimes=None, timeout=None,
                       __ThreadRets__=None, __ThreadName__=None, **kwargs):
@@ -171,12 +177,12 @@ class Libs(object):
         RES = None
 
         testFlowLike = hasattr(reqUrl, '__RouteTestFlow__')  # Utils.isinstanceT(reqUrl, TestFlow.TestFlowLikeFn)
-        times = 1 if testFlowLike else (tryTimes or PC.TryTimes)
+        times = 1 if testFlowLike else (tryTimes or Libs.PC.TryTimes)
         for i_times in range(times):
             RES = None
             errObj = None
             try:
-                logDbg('    --><{}>: {} timeout={} tryTimes=({}/{})'.format(
+                Libs.logDbg('    --><{}>: {} timeout={} tryTimes=({}/{})'.format(
                     threading.current_thread().name, reqUrl, timeout, i_times, times
                 ))
                 if testFlowLike:  # reqUrl是一个testFlowLike函数时
@@ -194,7 +200,7 @@ class Libs(object):
                         _resp = requests.request(method=reqMethod, url=reqUrl, json=reqJson, timeout=timeout,
                                                  **reqExtKw)
                     # assert _resp.status_code == 200, 'status_code == 200, but status_code={}'.format(_resp.status_code)
-                    # logDbg('_resp.headers={}'.format(_resp.headers))
+                    # Libs.logDbg('_resp.headers={}'.format(_resp.headers))
                     RES = _resp.json() if _resp.headers['Content-Type'].find('application/json') != -1 \
                         else dict(__TEXT__=_resp.text)
                 break
@@ -202,17 +208,17 @@ class Libs(object):
                 if '{!r}'.format(errObj).find('timeout') != -1 or '{!r}'.format(errObj).find('status_code') != -1:
                     continue
                 if _resp == None:
-                    _resp = DictObject(status_code=None, text=None)
+                    _resp = DictObject(status_code=None, text=None, errMsg=str_fmt(errObj))
                 RES = {
-                    '__error_at_respObj__': dict(status_code=_resp.status_code, text=_resp.text, reqUrl=str(reqUrl))
+                    '__error_at_respObj__': dict(status_code=_resp.status_code, text=_resp.text, reqUrl=str(reqUrl), errMsg=str_fmt(errObj))
                 }
                 break
         if RES is None:
             RES = {
                 '__error_at_respObj__': dict(status_code=_resp.status_code, text=_resp.text, reqUrl=str(reqUrl))
             }
-            logDbg(RES)
-        ret = HttpjsonResp(
+            Libs.logDbg(RES)
+        ret = Libs.HttpjsonResp(
             reqUrl=reqUrl, reqJson=reqJson, RES=RES, errObj=Exception(Utils.err_detail(errObj)) if errObj else None
         )
         if __ThreadRets__:
@@ -267,7 +273,7 @@ class Libs(object):
 
         """
         timeoutSum = timeoutSum or Libs.INI.TimeoutLong
-        __ThreadRets__ = ThreadRets()
+        __ThreadRets__ = Libs.ThreadRets()
         threads = {}
         _names = runOneKwargsDict.keys()
         _num = len(_names)
@@ -292,7 +298,7 @@ class Libs(object):
                 break
             time.sleep(1)
             if sec % 10 == 0:
-                logDbg('--><{}>: threadsRun({}): ({}/<{}+{}*{}>)s'.format(threading.current_thread().name, name, sec,
+                Libs.logDbg('--><{}>: threadsRun({}): ({}/<{}+{}*{}>)s'.format(threading.current_thread().name, name, sec,
                                                                           timeoutSum, __ThreadGap__, _num))
         else:
             if ifRaiseTimeout:
@@ -390,6 +396,8 @@ class TestFlow(TestStructAbstr):
     def __init__(self, name, timeout=None, **kwargs):
         TestStructAbstr.__init__(self, path=name)
         self.timeout = timeout
+    def run(self):
+        pass
     class TestFlowLikeFn(object):
         @classmethod
         def __IsinstanceT__(cls, o):
@@ -399,8 +407,6 @@ class TestFlow(TestStructAbstr):
         IN_kwargs = dict(**IN)
         if IN_kwargs.get('IN')==None:
             IN_kwargs['IN'] = IN
-        if IN_kwargs.get('T')==None:
-            IN_kwargs['T'] = IN
         return DictObject(IN_kwargs)
     @staticmethod
     def GetJson(run_res):
@@ -428,8 +434,8 @@ def asTestFlowFn(fn):
     AX(fn_argSpec, name + ':fn_argSpec').doAttrs(['varargs', 'keywords']).\
         isItemsEq(dict(varargs=None, keywords="kwargs"))
     fn_args = fn_argSpec.args[1:] if (fn_argSpec.args[:1] == ['self']) else fn_argSpec.args
-    if ('T' not in fn_args) and ('IN' not in  fn_args):
-        assert False, '{}:need T or IN in args, but args={}'.format(name, fn_args)
+    if ('IN' not in  fn_args):
+        assert False, '{}:need IN in args, but args={}'.format(name, fn_args)
 
     AX(fn_args, name + ':need all args has default (args.Len==defaults.Len)').is_length(len(fn_argSpec.defaults or tuple()))
 
@@ -441,16 +447,16 @@ def asTestFlowFn(fn):
             IN.__Name__ = name
 
             # 自动根据函数中的参数默认值定义，来更新参数的默认值, exam:
-            # def fn(IN={}, item_type="", modFile="lambda: 'templet_{}.json'.format(T.item_type)"):
+            # def fn(IN={}, item_type="", modFile="lambda: 'templet_{}.json'.format(IN.item_type)"):
             #     ...
             # AX(set(IN.keys()) - set(fn_args), name+':need set(IN.keys()) <= set(args)').is_length(0) #TODO 改为可以多传参
             for i in range(len(fn_args)): # 按顺序来，若有参数间依赖的需注意顺序
                 arg = fn_args[i]
                 default = fn_argSpec.defaults[i]
-                if arg in ['T', 'IN']:
+                if arg in ['IN']:
                     continue
                 if isinstance(default, basestring) and default.startswith('lambda:'):
-                    default_val = eval(default, dict(T=IN, IN=IN, Libs=Libs.ENV, PC=Libs.PC, INI=Libs.INI, Utils=Utils))()
+                    default_val = eval(default, dict(IN=IN, Libs=Libs.ENV, PC=Libs.PC, INI=Libs.INI, Utils=Utils))()
                     default_type = type(default_val)
                 else:
                     default_val = default
@@ -467,12 +473,12 @@ def asTestFlowFn(fn):
                     IN[arg] = default_val
 
                 if hasattr(default_type, '__ChkT__'):
-                    default_type.__ChkT__(IN[arg], name+':need T[{}] isa default_type={}'.format(arg, default_type))
+                    default_type.__ChkT__(IN[arg], name+':need IN[{}] isa default_type={}'.format(arg, default_type))
                 else:
-                    AX(IN[arg], name+':need T[{}] isa default_type={}'.format(arg, default_type)).\
+                    AX(IN[arg], name+':need IN[{}] isa default_type={}'.format(arg, default_type)).\
                         doCalled(Utils.isinstanceT, default_type).is_true()
             # IN_kwargs = dict(**IN)
-            # IN_kwargs.update(dict(T=IN, IN=IN))
+            # IN_kwargs.update(dict(IN=IN))
             IN_kwargs = TestFlow.IN_kwargs(IN)
 
             if fn_argSpec.args[0]=='self' and isinstance(args[0], TestBizKw):
@@ -531,7 +537,10 @@ def defTestStep(case):
             AX(fn_argSpec, '{}<argSpec>'.format(fn.__name__)).doAttr('defaults').is_length(1).doGeti(0).is_instance_of(
                 basestring)
 
-            testStep = fn(*args, **kwargs)
+            try:
+                testStep = fn(*args, **kwargs)
+            except Exception as errObj:
+                pass
             if testStep != None:
                 AX(testStep, 'testStep@{}'.format(fn.__name__)).is_instance_of(TestStep)
                 testStep = TYPE and TestStep() and testStep
@@ -539,7 +548,7 @@ def defTestStep(case):
                 testStep.title = fn_argSpec.defaults[0]
 
             return testStep
-        case.addStepFn(defTestStep_wrapper(V=None))
+        case.addStepFn(defTestStep_wrapper)
         return defTestStep_wrapper
     return defTestStep_decorator
 
@@ -597,13 +606,13 @@ class TestStep(TestFlow):
     def _auto_lazyloadAttrs(self):
         lazyloads = [_ for _ in self.__can_lazyloadAttrs if isinstance(_, types.LambdaType)]
         if len(lazyloads) != 0:
-            Libs.logDbg('TestStep({}): will auto self.attr=self.attr() in lazyloads={}'.format(name, lazyloads))
+            Libs.logDbg('TestStep({}): will auto self.attr=self.attr() in lazyloads={}'.format(self.name, lazyloads))
             for _lazyloadAttr in lazyloads:
                 _lazyloadValue = getattr(self, _lazyloadAttr)
                 setattr(_lazyloadAttr, _lazyloadValue())
 
-    def __init__(self, reqUrl='', reqMethod='post', title='', name='', reqJson={}, tryTimes=None, timeout=None,
-                 Chks=UndefCls('Chks'), chksExt='', Post='', reqExtKw={}, _caseObj=None, IN={}):
+    def __init__(self, reqUrl='', reqMethod='post', title='', name='step', reqJson={}, tryTimes=None, timeout=None,
+                 Chks=UndefCls('Chks'), chksExt='', Post='', _caseObj=None, IN={}, **reqExtKw):
         super(TestStep, self).__init__(name=name, timeout=timeout)
         if reqUrl=='':  # just for (testStep = TYPE and TestStep())
             return
@@ -624,9 +633,10 @@ class TestStep(TestFlow):
         ):
             assert False, 'assert reqUrl={!r} isa str or TestFlow.TestFlowLikeFn or TestDriver.isaDvMethod(reqUrl)'.format(self.reqUrl)
         self.IN = IN       #TODO 一般只有当用于@routeTestFlow时才会用到，仅用于方便传递参数
+        self.OUT = DictObject({})
         self.reqJson = reqJson
         self.reqMethod = reqMethod
-        self.reqExtKw = reqExtKw
+        self.reqExtKw = {k: v for k, v in reqExtKw.items() if k[0].islower()}
         self.tryTimes = tryTimes
         self.timeout = (timeout if not reqJson.get('timeout') else reqJson['timeout']) or Libs.INI.Timeout
         self.Chks = TestStep.Chks() and Chks
@@ -637,7 +647,7 @@ class TestStep(TestFlow):
         self.RES = {}
         self.failMsg = ''
         self.Post = Post
-        self._VStep = DictObject(Chks=self.Chks.Chks, RES=DictObject({}), IN=self.IN)
+        self._VStep = DictObject(Chks=self.Chks.Chks, RES=DictObject({}), IN=self.IN, OUT=self.OUT)
         self._hasRuned = False
         self._stacks = [__i for __i in inspect.stack() if __i[1].find('\\helpers\\pydev\\') == -1]
 
@@ -689,19 +699,20 @@ class TestStep(TestFlow):
             Chk = TYPE and TestStep.Chk() and self.Chks.Chks[name]
             try:
                 assert isinstance(Chk.chkExec, basestring), 'assert isinstance(Chk.chkExec, basestring), but Chk.chkExec={!r}'.format(Chk.chkExec)
-                Chk.fact = Utils.jpFinds(self.RES, Chk.jp, dftRaise=False, dft=Libs.Undefined)  # Libs.UndefinedStr才能被JSON化
+                Chk.fact = jpFinds(self.RES, Chk.jp, dftRaise=False, dft=Libs.Undefined)  # Libs.UndefinedStr才能被JSON化
                 if Chk.extractor:
                     Chk.fact = eval(Chk.extractor.encode('utf-8'), dict(Chk=DictObject(fact=Chk.fact)))
             except Exception as errObj:
                 return self.toReturn('Chks.{}({})'.format(name, Chk.chkExec), errObj)
             try:
                 if not eval(Chk.chkExec.encode('utf-8'), dict(Chk=Chk, Chks=self.Chks.Chks, V=V, _VStep=_VStep, Libs=Libs, Utils=Utils)):
-                    failMsg = 'Chks.{}(chkExec={!r}), but fact={} expect={})'.format(name, Chk.chkExec, Chk.fact, Chk.expect)
+                    # failMsg = 'Chks.{}(chkExec={!r}), but fact={} expect={})'.format(name, Chk.chkExec, Chk.fact, Chk.expect)
+                    failMsg = str_fmt('(but fact={} expect={})', json_o2t(Chk.fact), json_o2t(Chk.expect))
                     # if self.RES.get('failMsg'):
                     #     failMsg = '{} RES.failMsg=\n    {}'.format(failMsg, self.RES.get('failMsg'))
                     return self.toReturn('Chks.{}({})'.format(name, Chk.chkExec), failMsg)
             except Exception as errObj:
-                return self.toReturn('Chks.{}(chkExec={!r})'.format(name, Chk.chkExec), errObj)
+                return self.toReturn('Chks.{}({})'.format(name, Chk.chkExec), errObj)
 
         if self.chksExt and not eval(self.chksExt.encode('utf-8'), dict(Chks=self.Chks.Chks, V=V, _VStep=_VStep, Libs=Libs, Utils=Utils)):
             return self.toReturn('chksExt', self.chksExt)
@@ -732,7 +743,7 @@ class TestStep(TestFlow):
 
     def toJson(self, **kwargs):
         result = Libs.dictToJson(dict(
-            name=self.name, title=self.title, IN=self.IN,
+            name=self.name, title=self.title, IN=self.IN, OUT=self.OUT,
             reqUrl=str(self.reqUrl), reqJson=self.reqJson, # 造数据时太长的reqJson无关注意义
             reqMethod=self.reqMethod, reqExtKw=self.reqExtKw,
             RES=Libs.dictToJson(self.RES, self.path+'.RES', **kwargs),
@@ -763,12 +774,13 @@ class TestCase(TestFlow):
         self._stacks = [__i for __i in inspect.stack() if __i[1].find('\\helpers\\pydev\\') == -1]
 
     def addStepFn(self, stepFn):
-        #assert isinstance(stepFn, types.FunctionType), 'step={!r}: assert isinstance(step, function)'.format(stepFn)
-        assert isinstance(stepFn, TestStep), 'step={!r}: assert isinstance(step, TestStep)'.format(stepFn)
+        assert isinstance(stepFn, types.FunctionType), 'step={!r}: assert isinstance(step, function)'.format(stepFn)
+        # assert isinstance(stepFn, TestStep), 'step={!r}: assert isinstance(step, TestStep)'.format(stepFn)
         stepFn = TYPE and TestStep() and stepFn
-        AX(stepFn, stepFn.name).isNotIn([i.keys()[0] for i in self.stepFns])
-        self.stepFns.append({stepFn.name: stepFn})
-        self.__updCaseTimeout(stepFn.timeout)
+        stepName = stepFn.__name__
+        AX(stepFn, stepName).isNotIn([i.keys()[0] for i in self.stepFns])
+        self.stepFns.append({stepName: stepFn})
+        self.__updCaseTimeout(Libs.INI.TimeoutShort) #(stepFn.timeout)
 
     def __updCaseTimeout(self, timeout):
         self.timeout += timeout
@@ -806,7 +818,7 @@ class TestCase(TestFlow):
         try:
             for i in range(len(self.stepFns)):
                 stepFn = self.stepFns[i].values()[0]
-                step = stepFn # stepFn(V)  TODO: step的滞后加载放在，改为放在TestStep内部去兼容
+                step = stepFn(V) #stepFn # stepFn(V)  TODO: step的滞后加载放在，改为放在TestStep内部去兼容
                 if not step:
                     continue
                 step = TYPE and TestStep() and step
@@ -1038,7 +1050,7 @@ class FlaskExt(Flask):
                         AX(IN, name+':IN').is_instance_of(DictObject)
                     IN.__Name__ = name
                     # IN_kwargs = dict(**IN)
-                    # IN_kwargs.update(dict(T=IN, IN=IN))
+                    # IN_kwargs.update(dict(IN=IN))
                     IN_kwargs = TestFlow.IN_kwargs(IN)
 
                     argsNew = [] if not fn_argSpec.args[:1]==['self'] else args[:1]
@@ -1068,7 +1080,9 @@ class FlaskExt(Flask):
 
             setattr(routeTestFlow_asTestFlowFn_wrapper, '__RouteTestFlow__', TestFlow)
             # setattr(routeTestFlow_asTestFlowFn_wrapper, '__asTestFlowFn__', TestFlow)
-            setattr(routeTestFlow_asTestFlowFn_wrapper, '__OriginArgspecStr__', Utils.fn_argspecStr(fn))
+            setattr(routeTestFlow_asTestFlowFn_wrapper, '__OriginArgspecStr__',
+                    Utils.fn_argspecStr(fn) if not hasattr(fn, '__OriginArgspecStr__') else fn.__OriginArgspecStr__
+            )
             setattr(routeTestFlow_asTestFlowFn_wrapper, '__FlaskExtEndpoint__', __FlaskExtEndpoint__)
             return routeTestFlow_asTestFlowFn_wrapper
         return routeTestFlow_asTestFlowFn_decorator
@@ -1084,7 +1098,7 @@ class FlaskExt(Flask):
             fn_argSpec = inspect.getargspec(fn)
             AX(fn_argSpec, name + ':fn_argSpec').doAttrs(['varargs', 'keywords']).\
                 isItemsEq(dict(varargs=None, keywords="kwargs"))
-            AX('T', name+':need T in args').isIn(fn_argSpec.args)
+            AX('IN', name+':need IN in args').isIn(fn_argSpec.args)
             AX(fn_argSpec.args, name + ':need len(args)==len(defaults)').is_length(len(fn_argSpec.defaults or tuple()))
             @functools.wraps(fn)
             def routeTestFlow_wrapper(*args, **kwargs):
@@ -1103,16 +1117,16 @@ class FlaskExt(Flask):
                     IN.__Name__ = name
 
                     # 自动根据函数中的参数默认值定义，来更新参数的默认值, exam:
-                    # def fn(IN={}, item_type="", modFile="lambda: 'templet_{}.json'.format(T.item_type)"):
+                    # def fn(IN={}, item_type="", modFile="lambda: 'templet_{}.json'.format(IN.item_type)"):
                     #     ...
                     # AX(set(IN.keys()) - set(fn_argSpec.args), name+':need set(IN.keys()) <= set(args)').is_length(0) #TODO 改为可以多传参
                     for i in range(len(fn_argSpec.args)): # 按顺序来，若有参数间依赖的需注意顺序
                         arg = fn_argSpec.args[i]
                         default = fn_argSpec.defaults[i]
-                        if arg in ['T', 'IN']:
+                        if arg in ['IN']:
                             continue
                         if isinstance(default, basestring) and default.startswith('lambda:'):
-                            default_val = eval(default, dict(T=IN, IN=IN, ENV=Libs.ENV, PC=Libs.PC, Utils=Utils))()
+                            default_val = eval(default, dict(IN=IN, ENV=Libs.ENV, PC=Libs.PC, Utils=Utils))()
                             default_type = type(default_val)
                         else:
                             default_val = default
@@ -1129,12 +1143,12 @@ class FlaskExt(Flask):
                             IN[arg] = default_val
 
                         if hasattr(default_type, '__ChkT__'):
-                            default_type.__ChkT__(IN[arg], name+':need T[{}] isa default_type={}'.format(arg, default_type))
+                            default_type.__ChkT__(IN[arg], name+':need IN[{}] isa default_type={}'.format(arg, default_type))
                         else:
-                            AX(IN[arg], name+':need T[{}] isa default_type={}'.format(arg, default_type)).\
+                            AX(IN[arg], name+':need IN[{}] isa default_type={}'.format(arg, default_type)).\
                                 doCalled(Utils.isinstanceT, default_type).is_true()
                     # IN_kwargs = dict(**IN)
-                    # IN_kwargs.update(dict(T=IN, IN=IN))
+                    # IN_kwargs.update(dict(IN=IN))
                     IN_kwargs = TestFlow.IN_kwargs(IN)
 
                     argsNew = [] if not fn_argSpec.args[:1]==['self'] else args[:1]
