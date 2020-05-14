@@ -4,7 +4,7 @@ python:
 before_install:
 - pip install pytest-cov
 install:
-- pip install DictObject nbtest flask
+- pip install DictObject nbtest cchardet flask
 script:
 - PYTHONPATH=. py.test -v --cov=nbtest_legoSrvTest --cov-report term-missing tests
 deploy:

@@ -27,5 +27,5 @@ setup(
     download_url = 'https://github.com/jayvee-yjw/nbtest_legoSrvTest/archive/master.zip',
     keywords=["nbtest_legoSrvTest"],
     zip_safe=True,
-    install_requires=["DictObject", "nbtest", "flask"]
+    install_requires=["DictObject", "nbtest", "cchardet", "flask"]
 )
